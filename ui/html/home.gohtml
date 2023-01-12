@@ -1,0 +1,22 @@
+{{define "home"}}
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="ie=edge">
+        <title>Project Birdnest</title>
+    </head>
+    <body>
+    <div id="app"></div>
+    <script>
+        const app = document.getElementById("app");
+        const eventSource = new EventSource("/events?stream=birdnest");
+        eventSource.onmessage = (e) => {
+            app.innerHTML = e.data;
+        }
+    </script>
+    </body>
+    </html>
+{{end}}

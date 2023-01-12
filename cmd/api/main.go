@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"github.com/r3labs/sse/v2"
+	"github.com/tmaxmax/go-sse"
+	"html/template"
 	"io"
 	"math"
 	"net/http"
@@ -21,8 +23,9 @@ type config struct {
 }
 
 type application struct {
-	sseServer *sse.Server
-	cfg       config
+	sseHandler *sse.Server
+	cfg        config
+	tmpl       *template.Template
 }
 
 func main() {
@@ -39,12 +42,15 @@ func main() {
 	// Convert from meters to millimeters
 	cfg.noFlyZoneRadius *= 1000
 
-	server := sse.New()
-	server.CreateStream("birdnest")
+	tmpl, err := template.ParseGlob("./ui/html/*")
+	if err != nil {
+		panic("failed to read templates")
+	}
 
-	app := application{
-		sseServer: server,
-		cfg:       cfg,
+	app := &application{
+		sseHandler: sse.NewServer(),
+		cfg:        cfg,
+		tmpl:       tmpl,
 	}
 
 	go app.monitor()
@@ -53,7 +59,10 @@ func main() {
 
 func (app *application) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/events", app.sseServer.ServeHTTP)
+	mux.HandleFunc("/events", app.sseHandler.ServeHTTP)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		app.tmpl.ExecuteTemplate(w, "home", nil)
+	})
 
 	return mux
 }
@@ -75,6 +84,7 @@ type Report struct {
 		Drone             []Drone   `xml:"drone"`
 	} `xml:"capture"`
 }
+
 type Drone struct {
 	Text         string  `xml:",chardata"`
 	SerialNumber string  `xml:"serialNumber"`
@@ -178,5 +188,12 @@ func (app *application) monitor() {
 		for drone := range cache {
 			fmt.Println(drone)
 		}
+
+		buf := new(bytes.Buffer)
+		app.tmpl.ExecuteTemplate(buf, "pilot", nil)
+
+		e := &sse.Message{}
+		e.AppendData(buf.Bytes())
+		app.sseHandler.Publish(e)
 	}
 }
