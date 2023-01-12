@@ -9,10 +9,12 @@
         <title>Project Birdnest</title>
     </head>
     <body>
-    <div id="app"></div>
+    <div id="app">
+        {{template "pilot" .}}
+    </div>
     <script>
         const app = document.getElementById("app");
-        const eventSource = new EventSource("/events?stream=birdnest");
+        const eventSource = new EventSource("/events");
         eventSource.onmessage = (e) => {
             app.innerHTML = e.data;
         }

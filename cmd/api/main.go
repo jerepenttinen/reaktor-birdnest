@@ -11,6 +11,9 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
+	"sort"
+	"strconv"
 	"time"
 )
 
@@ -19,28 +22,43 @@ type config struct {
 	noFlyZoneOriginX float64
 	noFlyZoneOriginY float64
 	noFlyZoneRadius  float64
-	sleepDuration    int
+	sleepDuration    time.Duration
+	persistDuration  time.Duration
 }
 
 type application struct {
 	sseHandler *sse.Server
 	cfg        config
 	tmpl       *template.Template
+	homepage   []byte
+}
+
+func getEnvInt(key string, fallback int) int {
+	if value, ok := os.LookupEnv(key); ok {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
+	}
+	return fallback
 }
 
 func main() {
 	var cfg config
 
 	flag.IntVar(&cfg.serverPort, "port", getEnvInt("PORT", 8080), "API server port")
-	flag.IntVar(&cfg.sleepDuration, "sleep", 2000, "Timeout between drone position polls (milliseconds)")
+	var (
+		sleepDuration   int
+		persistDuration int
+	)
+	flag.IntVar(&sleepDuration, "sleep", 2000, "Timeout between drone position polls (milliseconds)")
+	flag.IntVar(&persistDuration, "persist", 10, "Time to persist violating pilots (minutes)")
 	flag.Float64Var(&cfg.noFlyZoneRadius, "no-fly-zone-radius", 100, "Radius of no-fly zone in meters")
 	flag.Float64Var(&cfg.noFlyZoneOriginX, "no-fly-zone-origin-x", 250000, "Origin X coordinate of no-fly zone in meters")
 	flag.Float64Var(&cfg.noFlyZoneOriginY, "no-fly-zone-origin-y", 250000, "Origin Y coordinate of no-fly zone in meters")
 
 	flag.Parse()
-
-	// Convert from meters to millimeters
-	cfg.noFlyZoneRadius *= 1000
+	cfg.sleepDuration = time.Duration(sleepDuration) * time.Millisecond
+	cfg.persistDuration = time.Duration(persistDuration) * time.Minute
 
 	tmpl, err := template.ParseGlob("./ui/html/*")
 	if err != nil {
@@ -61,7 +79,7 @@ func (app *application) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", app.sseHandler.ServeHTTP)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		app.tmpl.ExecuteTemplate(w, "home", nil)
+		w.Write(app.homepage)
 	})
 
 	return mux
@@ -109,9 +127,13 @@ type Pilot struct {
 }
 
 type Violation struct {
-	pilot           Pilot
-	lastTime        time.Time
-	closestDistance float64
+	Pilot           Pilot
+	LastTime        time.Time
+	ClosestDistance float64
+}
+
+type templateData struct {
+	Violations []Violation
 }
 
 // TODO: use timer
@@ -119,7 +141,7 @@ func (app *application) monitor() {
 	cache := make(map[string]Violation)
 
 	for {
-		time.Sleep(time.Duration(app.cfg.sleepDuration) * time.Millisecond)
+		time.Sleep(app.cfg.sleepDuration)
 
 		resp, err := http.Get("https://assignments.reaktor.com/birdnest/drones")
 		if err != nil {
@@ -138,18 +160,18 @@ func (app *application) monitor() {
 		}
 
 		for _, drone := range report.Capture.Drone {
-			distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY)
+			distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY) / 1000
 			if distance > app.cfg.noFlyZoneRadius {
 				continue
 			}
 
 			// Check if violation entry exists already
 			if violation, ok := cache[drone.SerialNumber]; ok {
-				if distance < violation.closestDistance {
-					violation.closestDistance = distance
+				if distance < violation.ClosestDistance {
+					violation.ClosestDistance = distance
 				}
 
-				violation.lastTime = report.Capture.SnapshotTimestamp
+				violation.LastTime = report.Capture.SnapshotTimestamp
 
 				cache[drone.SerialNumber] = violation
 			} else {
@@ -170,30 +192,43 @@ func (app *application) monitor() {
 				}
 
 				cache[drone.SerialNumber] = Violation{
-					pilot:           pilot,
-					lastTime:        report.Capture.SnapshotTimestamp,
-					closestDistance: distance,
+					Pilot:           pilot,
+					LastTime:        report.Capture.SnapshotTimestamp,
+					ClosestDistance: distance,
 				}
 			}
 		}
 
 		// Delete old entries
 		for drone, violation := range cache {
-			if report.Capture.SnapshotTimestamp.Sub(violation.lastTime) > time.Minute*10 {
+			if report.Capture.SnapshotTimestamp.Sub(violation.LastTime) > app.cfg.persistDuration {
 				delete(cache, drone)
 			}
 		}
 
-		fmt.Println("\nNEWTICK")
-		for drone := range cache {
-			fmt.Println(drone)
+		var violations []Violation
+		for _, violation := range cache {
+			violations = append(violations, violation)
 		}
 
-		buf := new(bytes.Buffer)
-		app.tmpl.ExecuteTemplate(buf, "pilot", nil)
+		sort.Slice(violations, func(i, j int) bool {
+			return violations[i].LastTime.After(violations[j].LastTime)
+		})
+
+		td := &templateData{
+			Violations: violations,
+		}
+
+		homeBuf := new(bytes.Buffer)
+		app.tmpl.ExecuteTemplate(homeBuf, "home", td)
+		app.homepage = homeBuf.Bytes()
+
+		pilotBuf := new(bytes.Buffer)
+		app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
 
 		e := &sse.Message{}
-		e.AppendData(buf.Bytes())
+		e.AppendData(pilotBuf.Bytes())
 		app.sseHandler.Publish(e)
+
 	}
 }

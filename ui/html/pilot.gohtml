@@ -9,6 +9,14 @@
         </tr>
         </thead>
         <tbody>
+        {{range .Violations}}
+            <tr>
+                <td>{{.ClosestDistance}}</td>
+                <td>{{.Pilot.FirstName}} {{.Pilot.LastName}}</td>
+                <td>{{.Pilot.Email}}</td>
+                <td>{{.Pilot.PhoneNumber}}</td>
+            </tr>
+        {{end}}
         </tbody>
     </table>
 {{end}}
