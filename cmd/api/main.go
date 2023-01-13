@@ -102,6 +102,7 @@ type templateData struct {
 func (app *application) monitor() {
 	drones := make(map[string]*list.Element)
 	violationQueue := list.New()
+	violationMutex := sync.RWMutex{}
 
 	for {
 		time.Sleep(app.cfg.sleepDuration)
@@ -111,40 +112,56 @@ func (app *application) monitor() {
 			continue
 		}
 
-		// TODO: use goroutine
+		wg := sync.WaitGroup{}
 		for _, drone := range report.Capture.Drone {
-			distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY) / 1000
-			if distance > app.cfg.noFlyZoneRadius {
-				continue
-			}
+			// Capture variable for goroutine
+			drone := drone
 
-			// Check if violation entry exists already
-			if element, ok := drones[drone.SerialNumber]; ok {
-				violation := element.Value.(Violation)
-				if distance < violation.ClosestDistance {
-					violation.ClosestDistance = distance
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY) / 1000
+				if distance > app.cfg.noFlyZoneRadius {
+					return
 				}
 
-				violation.LastTime = report.Capture.SnapshotTimestamp
+				// Check if violation entry exists already
+				violationMutex.RLock()
+				element, ok := drones[drone.SerialNumber]
+				violationMutex.RUnlock()
+				if ok {
+					violation := element.Value.(Violation)
+					if distance < violation.ClosestDistance {
+						violation.ClosestDistance = distance
+					}
 
-				element.Value = violation
-				violationQueue.MoveToFront(element)
-			} else {
-				pilot, err := data.GetDronePilot(drone.SerialNumber)
-				if err != nil {
-					fmt.Println(err)
-					continue
+					violation.LastTime = report.Capture.SnapshotTimestamp
+
+					violationMutex.Lock()
+					element.Value = violation
+					violationQueue.MoveToFront(element)
+					violationMutex.Unlock()
+				} else {
+					pilot, err := data.GetDronePilot(drone.SerialNumber)
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+
+					violationMutex.Lock()
+					element := violationQueue.PushFront(Violation{
+						Pilot:             pilot,
+						LastTime:          report.Capture.SnapshotTimestamp,
+						ClosestDistance:   distance,
+						droneSerialNumber: drone.SerialNumber,
+					})
+					drones[drone.SerialNumber] = element
+					violationMutex.Unlock()
 				}
-
-				element := violationQueue.PushFront(Violation{
-					Pilot:             pilot,
-					LastTime:          report.Capture.SnapshotTimestamp,
-					ClosestDistance:   distance,
-					droneSerialNumber: drone.SerialNumber,
-				})
-				drones[drone.SerialNumber] = element
-			}
+			}()
 		}
+
+		wg.Wait()
 
 		// Delete old violation entries
 		for back := violationQueue.Back(); back != nil; back = violationQueue.Back() {
