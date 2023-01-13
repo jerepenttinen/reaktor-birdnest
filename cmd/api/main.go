@@ -27,10 +27,11 @@ type config struct {
 }
 
 type application struct {
-	sseHandler *sse.Server
-	cfg        config
-	tmpl       *template.Template
-	homepage   []byte
+	sseHandler    *sse.Server
+	cfg           config
+	tmpl          *template.Template
+	homepage      []byte
+	homepageMutex sync.RWMutex
 }
 
 func getEnvInt(key string, fallback int) int {
@@ -79,6 +80,8 @@ func (app *application) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", app.sseHandler.ServeHTTP)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		app.homepageMutex.RLock()
+		defer app.homepageMutex.RUnlock()
 		w.Write(app.homepage)
 	})
 
@@ -221,7 +224,10 @@ func (app *application) monitor() {
 
 		homeBuf := new(bytes.Buffer)
 		app.tmpl.ExecuteTemplate(homeBuf, "home", td)
+
+		app.homepageMutex.Lock()
 		app.homepage = homeBuf.Bytes()
+		app.homepageMutex.Unlock()
 
 		pilotBuf := new(bytes.Buffer)
 		app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
