@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	reaktorbirdnest "reaktor-birdnest"
 	"reaktor-birdnest/internal/models"
 	"reaktor-birdnest/internal/models/birdnest"
 	"strconv"
@@ -65,7 +66,7 @@ func main() {
 	cfg.sleepDuration = time.Duration(sleepDuration) * time.Millisecond
 	cfg.persistDuration = time.Duration(persistDuration) * time.Minute
 
-	tmpl, err := template.ParseGlob("./ui/html/*")
+	tmpl, err := template.ParseFS(reaktorbirdnest.TemplateFS, "ui/html/*")
 	if err != nil {
 		panic("failed to read templates")
 	}
