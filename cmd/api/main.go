@@ -103,19 +103,14 @@ func (app *application) monitor() {
 	violationQueue := list.New()
 	violationMutex := sync.RWMutex{}
 
-	currentTime := time.Now().UTC()
-
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
 		report, err := data.GetReport()
 		if err != nil {
 			fmt.Println(err)
-
-			// Increment time, so when the report service is down old violations get removed
-			currentTime = currentTime.Add(app.cfg.sleepDuration)
-		} else {
-			currentTime = report.Capture.SnapshotTimestamp
 		}
+
+		currentTime := time.Now().UTC()
 
 		wg := sync.WaitGroup{}
 		for _, drone := range report.Capture.Drone {
