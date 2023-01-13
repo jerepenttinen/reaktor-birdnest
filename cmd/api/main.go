@@ -109,6 +109,7 @@ func (app *application) monitor() {
 	drones := make(map[string]*list.Element)
 	violationQueue := list.New()
 	violationMutex := sync.RWMutex{}
+	edited := true
 
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
@@ -149,6 +150,8 @@ func (app *application) monitor() {
 					violationMutex.Lock()
 					element.Value = violation
 					violationQueue.MoveToFront(element)
+
+					edited = true
 					violationMutex.Unlock()
 				} else {
 					pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
@@ -165,6 +168,8 @@ func (app *application) monitor() {
 						droneSerialNumber: drone.SerialNumber,
 					})
 					drones[drone.SerialNumber] = element
+
+					edited = true
 					violationMutex.Unlock()
 				}
 			}()
@@ -178,38 +183,43 @@ func (app *application) monitor() {
 			if currentTime.Sub(violation.LastTime) > app.cfg.persistDuration {
 				delete(drones, violation.droneSerialNumber)
 				violationQueue.Remove(back)
+				edited = true
 			} else {
 				// Queue is sorted by LastTime
 				break
 			}
 		}
 
-		// Transform violationQueue to slice, so it can be used in html/template
-		violations := make([]Violation, 0, violationQueue.Len())
-		for element := violationQueue.Front(); element != nil; element = element.Next() {
-			violations = append(violations, element.Value.(Violation))
-		}
+		// Try to send new event only when something has changed
+		if edited {
+			// Transform violationQueue to slice, so it can be used in html/template
+			violations := make([]Violation, 0, violationQueue.Len())
+			for element := violationQueue.Front(); element != nil; element = element.Next() {
+				violations = append(violations, element.Value.(Violation))
+			}
 
-		td := &templateData{
-			Violations: violations,
-		}
+			td := &templateData{
+				Violations: violations,
+			}
 
-		homeBuf := new(bytes.Buffer)
-		err = app.tmpl.ExecuteTemplate(homeBuf, "home", td)
-		if err == nil {
-			app.homepageMutex.Lock()
-			app.homepage = homeBuf.Bytes()
-			app.homepageMutex.Unlock()
-		}
+			homeBuf := new(bytes.Buffer)
+			err = app.tmpl.ExecuteTemplate(homeBuf, "home", td)
+			if err == nil {
+				app.homepageMutex.Lock()
+				app.homepage = homeBuf.Bytes()
+				app.homepageMutex.Unlock()
+			}
 
-		pilotBuf := new(bytes.Buffer)
-		err = app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
-		if err == nil {
-			e := &sse.Message{}
-			e.AppendData(pilotBuf.Bytes())
-			app.sseHandler.Publish(e)
-		}
+			pilotBuf := new(bytes.Buffer)
+			err = app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
+			if err == nil {
+				e := &sse.Message{}
+				e.AppendData(pilotBuf.Bytes())
+				app.sseHandler.Publish(e)
+			}
 
+		}
+		edited = false
 		<-ticker.C
 	}
 }
