@@ -98,17 +98,17 @@ type templateData struct {
 	Violations []Violation
 }
 
-// TODO: use timer
 func (app *application) monitor() {
 	drones := make(map[string]*list.Element)
 	violationQueue := list.New()
 	violationMutex := sync.RWMutex{}
 
+	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
-		time.Sleep(app.cfg.sleepDuration)
 		report, err := data.GetReport()
 		if err != nil {
 			fmt.Println(err)
+			<-ticker.C
 			continue
 		}
 
@@ -120,7 +120,9 @@ func (app *application) monitor() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY) / 1000
+				distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY)
+				// Convert millimeters to meters
+				distance /= 1000
 				if distance > app.cfg.noFlyZoneRadius {
 					return
 				}
@@ -186,18 +188,21 @@ func (app *application) monitor() {
 		}
 
 		homeBuf := new(bytes.Buffer)
-		app.tmpl.ExecuteTemplate(homeBuf, "home", td)
-
-		app.homepageMutex.Lock()
-		app.homepage = homeBuf.Bytes()
-		app.homepageMutex.Unlock()
+		err = app.tmpl.ExecuteTemplate(homeBuf, "home", td)
+		if err == nil {
+			app.homepageMutex.Lock()
+			app.homepage = homeBuf.Bytes()
+			app.homepageMutex.Unlock()
+		}
 
 		pilotBuf := new(bytes.Buffer)
-		app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
+		err = app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
+		if err == nil {
+			e := &sse.Message{}
+			e.AppendData(pilotBuf.Bytes())
+			app.sseHandler.Publish(e)
+		}
 
-		e := &sse.Message{}
-		e.AppendData(pilotBuf.Bytes())
-		app.sseHandler.Publish(e)
-
+		<-ticker.C
 	}
 }
