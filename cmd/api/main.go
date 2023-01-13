@@ -2,18 +2,17 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"encoding/xml"
+	"container/list"
 	"flag"
 	"fmt"
 	"github.com/tmaxmax/go-sse"
 	"html/template"
-	"io"
 	"math"
 	"net/http"
 	"os"
-	"sort"
+	"reaktor-birdnest/internal/data"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -89,9 +88,10 @@ func (app *application) routes() *http.ServeMux {
 }
 
 type Violation struct {
-	Pilot           Pilot
-	LastTime        time.Time
-	ClosestDistance float64
+	Pilot             data.Pilot
+	LastTime          time.Time
+	ClosestDistance   float64
+	droneSerialNumber string
 }
 
 type templateData struct {
@@ -100,7 +100,8 @@ type templateData struct {
 
 // TODO: use timer
 func (app *application) monitor() {
-	cache := make(map[string]Violation)
+	drones := make(map[string]*list.Element)
+	violationQueue := list.New()
 
 	for {
 		time.Sleep(app.cfg.sleepDuration)
@@ -110,12 +111,7 @@ func (app *application) monitor() {
 			continue
 		}
 
-		var report Report
-		err = xml.Unmarshal(body, &report)
-		if err != nil {
-			continue
-		}
-
+		// TODO: use goroutine
 		for _, drone := range report.Capture.Drone {
 			distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY) / 1000
 			if distance > app.cfg.noFlyZoneRadius {
@@ -123,14 +119,16 @@ func (app *application) monitor() {
 			}
 
 			// Check if violation entry exists already
-			if violation, ok := cache[drone.SerialNumber]; ok {
+			if element, ok := drones[drone.SerialNumber]; ok {
+				violation := element.Value.(Violation)
 				if distance < violation.ClosestDistance {
 					violation.ClosestDistance = distance
 				}
 
 				violation.LastTime = report.Capture.SnapshotTimestamp
 
-				cache[drone.SerialNumber] = violation
+				element.Value = violation
+				violationQueue.MoveToFront(element)
 			} else {
 				pilot, err := data.GetDronePilot(drone.SerialNumber)
 				if err != nil {
@@ -138,29 +136,33 @@ func (app *application) monitor() {
 					continue
 				}
 
-				cache[drone.SerialNumber] = Violation{
-					Pilot:           pilot,
-					LastTime:        report.Capture.SnapshotTimestamp,
-					ClosestDistance: distance,
-				}
+				element := violationQueue.PushFront(Violation{
+					Pilot:             pilot,
+					LastTime:          report.Capture.SnapshotTimestamp,
+					ClosestDistance:   distance,
+					droneSerialNumber: drone.SerialNumber,
+				})
+				drones[drone.SerialNumber] = element
 			}
 		}
 
-		// Delete old entries
-		for drone, violation := range cache {
+		// Delete old violation entries
+		for back := violationQueue.Back(); back != nil; back = violationQueue.Back() {
+			violation := back.Value.(Violation)
 			if report.Capture.SnapshotTimestamp.Sub(violation.LastTime) > app.cfg.persistDuration {
-				delete(cache, drone)
+				delete(drones, violation.droneSerialNumber)
+				violationQueue.Remove(back)
+			} else {
+				// Queue is sorted by LastTime
+				break
 			}
 		}
 
-		var violations []Violation
-		for _, violation := range cache {
-			violations = append(violations, violation)
+		// Transform violationQueue to slice, so it can be used in html/template
+		violations := make([]Violation, 0, violationQueue.Len())
+		for element := violationQueue.Front(); element != nil; element = element.Next() {
+			violations = append(violations, element.Value.(Violation))
 		}
-
-		sort.Slice(violations, func(i, j int) bool {
-			return violations[i].LastTime.After(violations[j].LastTime)
-		})
 
 		td := &templateData{
 			Violations: violations,
