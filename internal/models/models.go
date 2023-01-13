@@ -1,11 +1,7 @@
-package data
+package models
 
 import (
-	"encoding/json"
 	"encoding/xml"
-	"io"
-	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -46,48 +42,4 @@ type Pilot struct {
 	PhoneNumber string    `json:"phoneNumber"`
 	CreatedDt   time.Time `json:"createdDt"`
 	Email       string    `json:"email"`
-}
-
-func GetReport() (Report, error) {
-	resp, err := http.Get("https://assignments.reaktor.com/birdnest/drones")
-	if err != nil {
-		return Report{}, err
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Report{}, err
-	}
-
-	var report Report
-	err = xml.Unmarshal(body, &report)
-	if err != nil {
-		return Report{}, err
-	}
-	return report, nil
-}
-
-func GetDronePilot(droneSerialNumber string) (Pilot, error) {
-	droneUrl, err := url.JoinPath("https://assignments.reaktor.com/birdnest/pilots", droneSerialNumber)
-	if err != nil {
-		return Pilot{}, err
-	}
-
-	resp, err := http.Get(droneUrl)
-	if err != nil {
-		return Pilot{}, err
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Pilot{}, err
-	}
-
-	var pilot Pilot
-	err = json.Unmarshal(body, &pilot)
-	if err != nil {
-		return Pilot{}, err
-	}
-
-	return pilot, nil
 }

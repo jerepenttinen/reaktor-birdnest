@@ -10,7 +10,8 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"reaktor-birdnest/internal/data"
+	"reaktor-birdnest/internal/models"
+	"reaktor-birdnest/internal/models/birdnest"
 	"strconv"
 	"sync"
 	"time"
@@ -31,6 +32,10 @@ type application struct {
 	tmpl          *template.Template
 	homepage      []byte
 	homepageMutex sync.RWMutex
+	birdnest      interface {
+		GetReport() (models.Report, error)
+		GetDronePilot(droneSerialNumber string) (models.Pilot, error)
+	}
 }
 
 func getEnvInt(key string, fallback int) int {
@@ -69,6 +74,7 @@ func main() {
 		sseHandler: sse.NewServer(),
 		cfg:        cfg,
 		tmpl:       tmpl,
+		birdnest:   birdnest.Birdnest{},
 	}
 
 	go app.monitor()
@@ -88,7 +94,7 @@ func (app *application) routes() *http.ServeMux {
 }
 
 type Violation struct {
-	Pilot             data.Pilot
+	Pilot             models.Pilot
 	LastTime          time.Time
 	ClosestDistance   float64
 	droneSerialNumber string
@@ -105,7 +111,7 @@ func (app *application) monitor() {
 
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
-		report, err := data.GetReport()
+		report, err := app.birdnest.GetReport()
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -144,7 +150,7 @@ func (app *application) monitor() {
 					violationQueue.MoveToFront(element)
 					violationMutex.Unlock()
 				} else {
-					pilot, err := data.GetDronePilot(drone.SerialNumber)
+					pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
 					if err != nil {
 						fmt.Println(err)
 						return
