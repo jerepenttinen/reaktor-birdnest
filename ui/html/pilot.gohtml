@@ -11,7 +11,7 @@
         <tbody>
         {{range .Violations}}
             <tr>
-                <td>{{.ClosestDistance}}</td>
+                <td>{{printf "%.2f" .ClosestDistance}}</td>
                 <td>{{.Pilot.FirstName}} {{.Pilot.LastName}}</td>
                 <td>{{.Pilot.Email}}</td>
                 <td>{{.Pilot.PhoneNumber}}</td>
