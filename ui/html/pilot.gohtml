@@ -2,7 +2,7 @@
     <table>
         <thead>
         <tr>
-            <th>Closest distance to nest</th>
+            <th>Closest distance</th>
             <th>Name</th>
             <th>Email</th>
             <th>Phone number</th>
@@ -11,7 +11,7 @@
         <tbody>
         {{range .Violations}}
             <tr>
-                <td>{{printf "%.2f" .ClosestDistance}}</td>
+                <td>{{printf "%.2f" .ClosestDistance}} m</td>
                 <td>{{.Pilot.FirstName}} {{.Pilot.LastName}}</td>
                 <td>{{.Pilot.Email}}</td>
                 <td>{{.Pilot.PhoneNumber}}</td>
