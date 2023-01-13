@@ -103,13 +103,18 @@ func (app *application) monitor() {
 	violationQueue := list.New()
 	violationMutex := sync.RWMutex{}
 
+	currentTime := time.Now().UTC()
+
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
 		report, err := data.GetReport()
 		if err != nil {
 			fmt.Println(err)
-			<-ticker.C
-			continue
+
+			// Increment time, so when the report service is down old violations get removed
+			currentTime = currentTime.Add(app.cfg.sleepDuration)
+		} else {
+			currentTime = report.Capture.SnapshotTimestamp
 		}
 
 		wg := sync.WaitGroup{}
@@ -137,7 +142,7 @@ func (app *application) monitor() {
 						violation.ClosestDistance = distance
 					}
 
-					violation.LastTime = report.Capture.SnapshotTimestamp
+					violation.LastTime = currentTime
 
 					violationMutex.Lock()
 					element.Value = violation
@@ -153,7 +158,7 @@ func (app *application) monitor() {
 					violationMutex.Lock()
 					element := violationQueue.PushFront(Violation{
 						Pilot:             pilot,
-						LastTime:          report.Capture.SnapshotTimestamp,
+						LastTime:          currentTime,
 						ClosestDistance:   distance,
 						droneSerialNumber: drone.SerialNumber,
 					})
@@ -168,7 +173,7 @@ func (app *application) monitor() {
 		// Delete old violation entries
 		for back := violationQueue.Back(); back != nil; back = violationQueue.Back() {
 			violation := back.Value.(Violation)
-			if report.Capture.SnapshotTimestamp.Sub(violation.LastTime) > app.cfg.persistDuration {
+			if currentTime.Sub(violation.LastTime) > app.cfg.persistDuration {
 				delete(drones, violation.droneSerialNumber)
 				violationQueue.Remove(back)
 			} else {
