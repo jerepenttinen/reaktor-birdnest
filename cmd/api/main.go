@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"container/list"
 	"flag"
 	"fmt"
 	"github.com/tmaxmax/go-sse"
@@ -11,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	reaktorbirdnest "reaktor-birdnest"
+	"reaktor-birdnest/internal/datastore"
 	"reaktor-birdnest/internal/models"
 	"reaktor-birdnest/internal/models/birdnest"
 	"strconv"
@@ -36,6 +36,13 @@ type application struct {
 	birdnest      interface {
 		GetReport() (models.Report, error)
 		GetDronePilot(droneSerialNumber string) (models.Pilot, error)
+	}
+	violations interface {
+		Get(id string) (*Violation, bool)
+		Upsert(id string, data *Violation)
+		DeleteOldestWhile(cond func(violation Violation) bool)
+		AsSlice() []Violation
+		HasChanges() bool
 	}
 }
 
@@ -76,6 +83,7 @@ func main() {
 		cfg:        cfg,
 		tmpl:       tmpl,
 		birdnest:   birdnest.Birdnest{},
+		violations: datastore.New[Violation](),
 	}
 
 	go app.monitor()
@@ -95,10 +103,9 @@ func (app *application) routes() *http.ServeMux {
 }
 
 type Violation struct {
-	Pilot             models.Pilot
-	LastTime          time.Time
-	ClosestDistance   float64
-	droneSerialNumber string
+	Pilot           models.Pilot
+	LastTime        time.Time
+	ClosestDistance float64
 }
 
 type templateData struct {
@@ -106,11 +113,6 @@ type templateData struct {
 }
 
 func (app *application) monitor() {
-	drones := make(map[string]*list.Element)
-	violationQueue := list.New()
-	violationMutex := sync.RWMutex{}
-	edited := true
-
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
 		report, err := app.birdnest.GetReport()
@@ -136,23 +138,13 @@ func (app *application) monitor() {
 				}
 
 				// Check if violation entry exists already
-				violationMutex.RLock()
-				element, ok := drones[drone.SerialNumber]
-				violationMutex.RUnlock()
-				if ok {
-					violation := element.Value.(Violation)
+				violation, found := app.violations.Get(drone.SerialNumber)
+				if found {
 					if distance < violation.ClosestDistance {
 						violation.ClosestDistance = distance
 					}
 
 					violation.LastTime = currentTime
-
-					violationMutex.Lock()
-					element.Value = violation
-					violationQueue.MoveToFront(element)
-
-					edited = true
-					violationMutex.Unlock()
 				} else {
 					pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
 					if err != nil {
@@ -160,46 +152,27 @@ func (app *application) monitor() {
 						return
 					}
 
-					violationMutex.Lock()
-					element := violationQueue.PushFront(Violation{
-						Pilot:             pilot,
-						LastTime:          currentTime,
-						ClosestDistance:   distance,
-						droneSerialNumber: drone.SerialNumber,
-					})
-					drones[drone.SerialNumber] = element
-
-					edited = true
-					violationMutex.Unlock()
+					violation = &Violation{
+						Pilot:           pilot,
+						LastTime:        currentTime,
+						ClosestDistance: distance,
+					}
 				}
+
+				app.violations.Upsert(drone.SerialNumber, violation)
 			}()
 		}
 
 		wg.Wait()
 
-		// Delete old violation entries
-		for back := violationQueue.Back(); back != nil; back = violationQueue.Back() {
-			violation := back.Value.(Violation)
-			if currentTime.Sub(violation.LastTime) > app.cfg.persistDuration {
-				delete(drones, violation.droneSerialNumber)
-				violationQueue.Remove(back)
-				edited = true
-			} else {
-				// Queue is sorted by LastTime
-				break
-			}
-		}
+		app.violations.DeleteOldestWhile(func(v Violation) bool {
+			return currentTime.Sub(v.LastTime) > app.cfg.persistDuration
+		})
 
 		// Try to send new event only when something has changed
-		if edited {
-			// Transform violationQueue to slice, so it can be used in html/template
-			violations := make([]Violation, 0, violationQueue.Len())
-			for element := violationQueue.Front(); element != nil; element = element.Next() {
-				violations = append(violations, element.Value.(Violation))
-			}
-
+		if app.violations.HasChanges() {
 			td := &templateData{
-				Violations: violations,
+				Violations: app.violations.AsSlice(),
 			}
 
 			homeBuf := new(bytes.Buffer)
@@ -219,7 +192,6 @@ func (app *application) monitor() {
 			}
 
 		}
-		edited = false
 		<-ticker.C
 	}
 }
