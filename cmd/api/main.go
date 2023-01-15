@@ -78,12 +78,19 @@ func main() {
 		panic("failed to read templates")
 	}
 
+	homeBuf := new(bytes.Buffer)
+	err = tmpl.ExecuteTemplate(homeBuf, "home", nil)
+	if err != nil {
+		panic("failed to render initial home template")
+	}
+
 	app := &application{
 		sseHandler: sse.NewServer(),
 		cfg:        cfg,
 		tmpl:       tmpl,
 		birdnest:   birdnest.Birdnest{},
 		violations: datastore.New[Violation](),
+		homepage:   homeBuf.Bytes(),
 	}
 
 	go app.monitor(make(chan bool), app.processViolations)
