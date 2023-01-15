@@ -6,9 +6,9 @@ COPY . .
 
 RUN go mod download
 
-RUN go build -o /reaktor-birdnest ./cmd/api
+RUN CGO_ENABLED=0 go build -o /reaktor-birdnest -installsuffix "static" ./cmd/api
 
-FROM gcr.io/distroless/base-debian11
+FROM gcr.io/distroless/static-debian11
 
 COPY --from=build /reaktor-birdnest /reaktor-birdnest
 
