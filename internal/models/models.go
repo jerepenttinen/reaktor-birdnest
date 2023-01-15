@@ -19,20 +19,22 @@ type Report struct {
 	Capture struct {
 		Text              string    `xml:",chardata"`
 		SnapshotTimestamp time.Time `xml:"snapshotTimestamp,attr"`
-		Drone             []struct {
-			Text         string  `xml:",chardata"`
-			SerialNumber string  `xml:"serialNumber"`
-			Model        string  `xml:"model"`
-			Manufacturer string  `xml:"manufacturer"`
-			Mac          string  `xml:"mac"`
-			Ipv4         string  `xml:"ipv4"`
-			Ipv6         string  `xml:"ipv6"`
-			Firmware     string  `xml:"firmware"`
-			PositionY    float64 `xml:"positionY"`
-			PositionX    float64 `xml:"positionX"`
-			Altitude     float64 `xml:"altitude"`
-		} `xml:"drone"`
+		Drone             []Drone   `xml:"drone"`
 	} `xml:"capture"`
+}
+
+type Drone struct {
+	Text         string  `xml:",chardata"`
+	SerialNumber string  `xml:"serialNumber"`
+	Model        string  `xml:"model"`
+	Manufacturer string  `xml:"manufacturer"`
+	Mac          string  `xml:"mac"`
+	Ipv4         string  `xml:"ipv4"`
+	Ipv6         string  `xml:"ipv6"`
+	Firmware     string  `xml:"firmware"`
+	PositionY    float64 `xml:"positionY"`
+	PositionX    float64 `xml:"positionX"`
+	Altitude     float64 `xml:"altitude"`
 }
 
 type Pilot struct {
