@@ -38,8 +38,8 @@ type application struct {
 		GetDronePilot(droneSerialNumber string) (models.Pilot, error)
 	}
 	violations interface {
-		Get(id string) (*Violation, bool)
-		Upsert(id string, data *Violation)
+		Get(id string) (Violation, bool)
+		Upsert(id string, data Violation)
 		DeleteOldestWhile(cond func(violation Violation) bool)
 		AsSlice() []Violation
 		HasChanges() bool
@@ -156,7 +156,7 @@ func (app *application) monitor(done chan bool, dispatchViolations func([]Violat
 							return
 						}
 
-						violation = &Violation{
+						violation = Violation{
 							Pilot:           pilot,
 							LastTime:        currentTime,
 							ClosestDistance: distance,

@@ -7,7 +7,7 @@ import (
 
 type ElementWithID[T any] struct {
 	id   string
-	data *T
+	data T
 }
 
 type DataStore[T any] struct {
@@ -25,28 +25,28 @@ func New[T any]() *DataStore[T] {
 	}
 }
 
-func (d *DataStore[T]) Get(id string) (*T, bool) {
+func (d *DataStore[T]) Get(id string) (T, bool) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 	element, ok := d.registry[id]
 	if !ok {
-		return nil, false
+		return *new(T), false
 	}
 
-	return element.Value.(ElementWithID[T]).data, true
+	return element.Value.(*ElementWithID[T]).data, true
 }
 
-func (d *DataStore[T]) Upsert(id string, data *T) {
+func (d *DataStore[T]) Upsert(id string, data T) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
 	d.dirty = true
 	if element, ok := d.registry[id]; ok {
-		e := element.Value.(ElementWithID[T])
+		e := element.Value.(*ElementWithID[T])
 		e.data = data
 		d.queue.MoveToFront(element)
 	} else {
-		element := d.queue.PushFront(ElementWithID[T]{
+		element := d.queue.PushFront(&ElementWithID[T]{
 			id:   id,
 			data: data,
 		})
@@ -59,8 +59,8 @@ func (d *DataStore[T]) DeleteOldestWhile(cond func(T) bool) {
 	defer d.mut.Unlock()
 
 	for back := d.queue.Back(); back != nil; back = d.queue.Back() {
-		underlying := back.Value.(ElementWithID[T])
-		if cond(*underlying.data) {
+		underlying := back.Value.(*ElementWithID[T])
+		if cond(underlying.data) {
 			delete(d.registry, underlying.id)
 			d.queue.Remove(back)
 			d.dirty = true
@@ -76,7 +76,7 @@ func (d *DataStore[T]) AsSlice() []T {
 
 	result := make([]T, 0, d.queue.Len())
 	for element := d.queue.Front(); element != nil; element = element.Next() {
-		result = append(result, *element.Value.(ElementWithID[T]).data)
+		result = append(result, element.Value.(*ElementWithID[T]).data)
 	}
 	return result
 }
