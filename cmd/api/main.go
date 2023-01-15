@@ -86,7 +86,7 @@ func main() {
 		violations: datastore.New[Violation](),
 	}
 
-	go app.monitor()
+	go app.monitor(make(chan bool), app.processViolations)
 	http.ListenAndServe(fmt.Sprintf(":%d", cfg.serverPort), app.routes())
 }
 
@@ -112,86 +112,92 @@ type templateData struct {
 	Violations []Violation
 }
 
-func (app *application) monitor() {
+func (app *application) monitor(done chan bool, dispatchViolations func([]Violation)) {
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
-		report, err := app.birdnest.GetReport()
-		if err != nil {
-			fmt.Println(err)
-		}
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			report, err := app.birdnest.GetReport()
+			if err != nil {
+				fmt.Println(err)
+			}
 
-		currentTime := time.Now().UTC()
+			currentTime := time.Now().UTC()
 
-		wg := sync.WaitGroup{}
-		for _, drone := range report.Capture.Drone {
-			// Capture variable for goroutine
-			drone := drone
+			wg := sync.WaitGroup{}
+			for _, drone := range report.Capture.Drone {
+				// Capture variable for goroutine
+				drone := drone
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY)
-				// Convert millimeters to meters
-				distance /= 1000
-				if distance > app.cfg.noFlyZoneRadius {
-					return
-				}
-
-				// Check if violation entry exists already
-				violation, found := app.violations.Get(drone.SerialNumber)
-				if found {
-					if distance < violation.ClosestDistance {
-						violation.ClosestDistance = distance
-					}
-
-					violation.LastTime = currentTime
-				} else {
-					pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
-					if err != nil {
-						fmt.Println(err)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					distance := math.Hypot(app.cfg.noFlyZoneOriginX-drone.PositionX, app.cfg.noFlyZoneOriginY-drone.PositionY)
+					// Convert millimeters to meters
+					distance /= 1000
+					if distance > app.cfg.noFlyZoneRadius {
 						return
 					}
 
-					violation = &Violation{
-						Pilot:           pilot,
-						LastTime:        currentTime,
-						ClosestDistance: distance,
+					// Check if violation entry exists already
+					violation, found := app.violations.Get(drone.SerialNumber)
+					if found {
+						if distance < violation.ClosestDistance {
+							violation.ClosestDistance = distance
+						}
+
+						violation.LastTime = currentTime
+					} else {
+						pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
+						if err != nil {
+							fmt.Println(err)
+							return
+						}
+
+						violation = &Violation{
+							Pilot:           pilot,
+							LastTime:        currentTime,
+							ClosestDistance: distance,
+						}
 					}
-				}
 
-				app.violations.Upsert(drone.SerialNumber, violation)
-			}()
+					app.violations.Upsert(drone.SerialNumber, violation)
+				}()
+			}
+			wg.Wait()
+
+			app.violations.DeleteOldestWhile(func(v Violation) bool {
+				return currentTime.Sub(v.LastTime) > app.cfg.persistDuration
+			})
+
+			// Try to send new event only when something has changed
+			if app.violations.HasChanges() {
+				dispatchViolations(app.violations.AsSlice())
+			}
 		}
+	}
+}
 
-		wg.Wait()
+func (app *application) processViolations(violations []Violation) {
+	td := &templateData{
+		Violations: violations,
+	}
 
-		app.violations.DeleteOldestWhile(func(v Violation) bool {
-			return currentTime.Sub(v.LastTime) > app.cfg.persistDuration
-		})
+	homeBuf := new(bytes.Buffer)
+	err := app.tmpl.ExecuteTemplate(homeBuf, "home", td)
+	if err == nil {
+		app.homepageMutex.Lock()
+		app.homepage = homeBuf.Bytes()
+		app.homepageMutex.Unlock()
+	}
 
-		// Try to send new event only when something has changed
-		if app.violations.HasChanges() {
-			td := &templateData{
-				Violations: app.violations.AsSlice(),
-			}
-
-			homeBuf := new(bytes.Buffer)
-			err = app.tmpl.ExecuteTemplate(homeBuf, "home", td)
-			if err == nil {
-				app.homepageMutex.Lock()
-				app.homepage = homeBuf.Bytes()
-				app.homepageMutex.Unlock()
-			}
-
-			pilotBuf := new(bytes.Buffer)
-			err = app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
-			if err == nil {
-				e := &sse.Message{}
-				e.AppendData(pilotBuf.Bytes())
-				app.sseHandler.Publish(e)
-			}
-
-		}
-		<-ticker.C
+	pilotBuf := new(bytes.Buffer)
+	err = app.tmpl.ExecuteTemplate(pilotBuf, "pilot", td)
+	if err == nil {
+		e := &sse.Message{}
+		e.AppendData(pilotBuf.Bytes())
+		app.sseHandler.Publish(e)
 	}
 }
