@@ -8,12 +8,10 @@ import (
 	"html/template"
 	"math"
 	"net/http"
-	"os"
 	reaktorbirdnest "reaktor-birdnest"
 	"reaktor-birdnest/internal/datastore"
 	"reaktor-birdnest/internal/models"
 	"reaktor-birdnest/internal/models/birdnest"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -44,15 +42,6 @@ type application struct {
 		AsSlice() []Violation
 		HasChanges() bool
 	}
-}
-
-func getEnvInt(key string, fallback int) int {
-	if value, ok := os.LookupEnv(key); ok {
-		if i, err := strconv.Atoi(value); err == nil {
-			return i
-		}
-	}
-	return fallback
 }
 
 func main() {
