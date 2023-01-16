@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/xml"
 	"errors"
-	"reaktor-birdnest/internal/datastore"
 	"reaktor-birdnest/internal/models"
+	"reaktor-birdnest/internal/persistance/datastore"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +12,7 @@ import (
 
 func TestAddingViolations(t *testing.T) {
 	app := newApp()
+	app.violations = datastore.New[models.Violation](app.cfg.persistDuration)
 
 	expectedDistance := 50.0
 	violations := runMonitor(&app, &BirdnestMock{
@@ -58,6 +59,7 @@ func TestRemoval(t *testing.T) {
 	app := newApp()
 	// Set duration to zero violations are removed in the next tick
 	app.cfg.persistDuration = 0
+	app.violations = datastore.New[models.Violation](app.cfg.persistDuration)
 
 	expectedDistance := 50.0
 	violations := runMonitor(&app, &BirdnestMock{
@@ -96,6 +98,7 @@ func TestRemoval(t *testing.T) {
 
 func TestUpdateExistingPilot(t *testing.T) {
 	app := newApp()
+	app.violations = datastore.New[models.Violation](app.cfg.persistDuration)
 
 	firstDistance := 50.0
 	secondDistance := 40.0
@@ -159,14 +162,16 @@ func TestUpdateExistingPilot(t *testing.T) {
 	}
 }
 
-func runMonitor(app *application, birdnest *BirdnestMock) [][]Violation {
+func runMonitor(app *application, birdnest *BirdnestMock) [][]models.Violation {
 	done := make(chan bool, 1)
-	violations := make([][]Violation, 0)
+	violations := make([][]models.Violation, 0)
 	birdnest.end = done
 	app.birdnest = birdnest
 
-	app.monitor(done, func(v []Violation) {
+	app.monitor(done, func(v []models.Violation) {
 		violations = append(violations, v)
+		// Give time for expiring
+		time.Sleep(2 * time.Millisecond)
 	})
 	return violations
 }
@@ -191,7 +196,6 @@ func newApp() application {
 			sleepDuration:    time.Millisecond,
 			persistDuration:  10 * time.Minute,
 		},
-		violations: datastore.New[Violation](),
 	}
 }
 

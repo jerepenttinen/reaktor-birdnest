@@ -3,24 +3,24 @@ package main
 import (
 	"fmt"
 	"math"
+	"reaktor-birdnest/internal/models"
 	"sync"
 	"time"
 )
 
-func (app *application) monitor(done <-chan bool, dispatchViolations func([]Violation)) {
+func (app *application) monitor(done <-chan bool, dispatchViolations func([]models.Violation)) {
 	ticker := time.NewTicker(app.cfg.sleepDuration)
 	for {
 		select {
 		case <-done:
 			ticker.Stop()
+			app.violations.Destroy()
 			return
 		case <-ticker.C:
 			report, err := app.birdnest.GetReport()
 			if err != nil {
 				fmt.Println(err)
 			}
-
-			currentTime := time.Now().UTC()
 
 			wg := sync.WaitGroup{}
 			for _, drone := range report.Capture.Drone {
@@ -43,8 +43,6 @@ func (app *application) monitor(done <-chan bool, dispatchViolations func([]Viol
 						if distance < violation.ClosestDistance {
 							violation.ClosestDistance = distance
 						}
-
-						violation.LastTime = currentTime
 					} else {
 						pilot, err := app.birdnest.GetDronePilot(drone.SerialNumber)
 						if err != nil {
@@ -52,9 +50,8 @@ func (app *application) monitor(done <-chan bool, dispatchViolations func([]Viol
 							return
 						}
 
-						violation = Violation{
+						violation = models.Violation{
 							Pilot:           pilot,
-							LastTime:        currentTime,
 							ClosestDistance: distance,
 						}
 					}
@@ -63,10 +60,6 @@ func (app *application) monitor(done <-chan bool, dispatchViolations func([]Viol
 				}()
 			}
 			wg.Wait()
-
-			app.violations.DeleteOldestWhile(func(v Violation) bool {
-				return currentTime.Sub(v.LastTime) > app.cfg.persistDuration
-			})
 
 			// Try to send new event only when something has changed
 			if app.violations.HasChanges() {

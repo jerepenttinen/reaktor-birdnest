@@ -8,9 +8,10 @@ import (
 	"html/template"
 	"net/http"
 	reaktorbirdnest "reaktor-birdnest"
-	"reaktor-birdnest/internal/datastore"
+	"reaktor-birdnest/internal/interfaces"
 	"reaktor-birdnest/internal/models"
 	"reaktor-birdnest/internal/models/birdnest"
+	"reaktor-birdnest/internal/persistance/datastore"
 	"sync"
 	"time"
 )
@@ -24,33 +25,17 @@ type config struct {
 	persistDuration  time.Duration
 }
 
-type Violation struct {
-	Pilot           models.Pilot
-	LastTime        time.Time
-	ClosestDistance float64
-}
-
-type IBirdnest interface {
-	GetReport() (models.Report, error)
-	GetDronePilot(droneSerialNumber string) (models.Pilot, error)
-}
-
 type application struct {
 	sseHandler    *sse.Server
 	cfg           config
 	tmpl          *template.Template
 	homepage      []byte
 	homepageMutex sync.RWMutex
-	birdnest      IBirdnest
-	violations    interface {
-		Get(id string) (Violation, bool)
-		Upsert(id string, data Violation)
-		DeleteOldestWhile(cond func(violation Violation) bool)
-		AsSlice() []Violation
-		HasChanges() bool
-	}
+	birdnest      interfaces.Birdnest
+	violations    interfaces.Violations
 }
 
+// DeleteOldestWhile(cond func(violation Violation) bool)
 func main() {
 	var cfg config
 
@@ -85,7 +70,7 @@ func main() {
 		cfg:        cfg,
 		tmpl:       tmpl,
 		birdnest:   birdnest.Birdnest{},
-		violations: datastore.New[Violation](),
+		violations: datastore.New[models.Violation](cfg.persistDuration),
 		homepage:   homeBuf.Bytes(),
 	}
 
@@ -106,10 +91,10 @@ func (app *application) routes() *http.ServeMux {
 }
 
 type templateData struct {
-	Violations []Violation
+	Violations []models.Violation
 }
 
-func (app *application) processViolations(violations []Violation) {
+func (app *application) processViolations(violations []models.Violation) {
 	td := &templateData{
 		Violations: violations,
 	}

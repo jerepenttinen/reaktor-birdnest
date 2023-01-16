@@ -45,3 +45,8 @@ type Pilot struct {
 	CreatedDt   time.Time `json:"createdDt"`
 	Email       string    `json:"email"`
 }
+
+type Violation struct {
+	Pilot           Pilot
+	ClosestDistance float64
+}

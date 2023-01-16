@@ -13,5 +13,5 @@ Pilot information is persisted in a queue that is in insertion/update order.
 * `cmd/api/monitor.go` Event loop that drives the application
 * `cmd/api/monitor_test.go` Tests for the previous
 * `cmd/api/main.go` Setup code for the application
-* `internal/datastore/datastore.go` Queue for persisting the pilot information
+* `internal/persistance/datastore/datastore.go` Queue for persisting the pilot information
 * `internal/models/birdnest/birdnest.go` Repository for the assignment API
