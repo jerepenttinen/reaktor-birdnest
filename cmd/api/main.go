@@ -40,7 +40,6 @@ type application struct {
 	violations    interfaces.Violations
 }
 
-// DeleteOldestWhile(cond func(violation Violation) bool)
 func main() {
 	var cfg config
 
