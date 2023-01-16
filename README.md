@@ -12,9 +12,9 @@ Pilot information is persisted using Redis or alternatively in a queue that is i
 To use Redis set `REDIS_URL` environment variable.
 
 ### Important files
-* `cmd/api/monitor.go` Event loop that drives the application
-* `cmd/api/monitor_test.go` Tests for the previous
-* `cmd/api/main.go` Setup code for the application
-* `internal/persistence/myredis/myredis.go` Persistence using Redis
-* `internal/persistence/datastore/datastore.go` Queue for persisting the pilot information
-* `internal/models/birdnest/birdnest.go` Repository for the assignment API
+* [`cmd/api/monitor.go`](cmd/api/monitor.go) Event loop that drives the application
+* [`cmd/api/monitor_test.go`](cmd/api/monitor_test.go) Tests for the previous
+* [`cmd/api/main.go`](cmd/api/main.go) Setup code for the application
+* [`internal/persistence/myredis/myredis.go`](internal/persistence/myredis/myredis.go) Persistence using Redis
+* [`internal/persistence/datastore/datastore.go`](internal/persistence/datastore/datastore.go) Queue for persisting the pilot information
+* [`internal/models/birdnest/birdnest.go`](internal/models/birdnest/birdnest.go) Repository for the assignment API
