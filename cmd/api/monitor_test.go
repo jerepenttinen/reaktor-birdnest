@@ -4,7 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"reaktor-birdnest/internal/models"
-	"reaktor-birdnest/internal/persistance/datastore"
+	"reaktor-birdnest/internal/persistence/datastore"
 	"strings"
 	"testing"
 	"time"

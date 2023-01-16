@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/go-redis/redis/v9"
 	"github.com/tmaxmax/go-sse"
 	"html/template"
+	"log"
 	"net/http"
+	"os"
 	reaktorbirdnest "reaktor-birdnest"
 	"reaktor-birdnest/internal/interfaces"
 	"reaktor-birdnest/internal/models"
 	"reaktor-birdnest/internal/models/birdnest"
-	"reaktor-birdnest/internal/persistance/datastore"
+	"reaktor-birdnest/internal/persistence/datastore"
+	"reaktor-birdnest/internal/persistence/myredis"
 	"sync"
 	"time"
 )
@@ -23,6 +27,7 @@ type config struct {
 	noFlyZoneRadius  float64
 	sleepDuration    time.Duration
 	persistDuration  time.Duration
+	redisUrl         string
 }
 
 type application struct {
@@ -49,6 +54,7 @@ func main() {
 	flag.Float64Var(&cfg.noFlyZoneRadius, "no-fly-zone-radius", 100, "Radius of no-fly zone in meters")
 	flag.Float64Var(&cfg.noFlyZoneOriginX, "no-fly-zone-origin-x", 250000, "Origin X coordinate of no-fly zone in meters")
 	flag.Float64Var(&cfg.noFlyZoneOriginY, "no-fly-zone-origin-y", 250000, "Origin Y coordinate of no-fly zone in meters")
+	flag.StringVar(&cfg.redisUrl, "redis-url", os.Getenv("REDIS_URL"), "URL for connecting to Redis")
 
 	flag.Parse()
 	cfg.sleepDuration = time.Duration(sleepDuration) * time.Millisecond
@@ -70,8 +76,19 @@ func main() {
 		cfg:        cfg,
 		tmpl:       tmpl,
 		birdnest:   birdnest.Birdnest{},
-		violations: datastore.New[models.Violation](cfg.persistDuration),
 		homepage:   homeBuf.Bytes(),
+	}
+
+	if len(cfg.redisUrl) != 0 {
+		url, err := redis.ParseURL(cfg.redisUrl)
+		if err != nil {
+			log.Fatalf("invalid url %v, %s", err, cfg.redisUrl)
+		}
+		fmt.Println("Using Redis")
+		app.violations = myredis.New[models.Violation](url, cfg.persistDuration)
+	} else {
+		fmt.Println("Using datastore")
+		app.violations = datastore.New[models.Violation](cfg.persistDuration)
 	}
 
 	go app.monitor(make(chan bool), app.processViolations)
